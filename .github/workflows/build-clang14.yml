@@ -98,35 +98,74 @@ jobs:
     #     key: build-kernel-mido-kernel
     #     max-size: 2G
 
-    - name: 开始编译内核
+
+    # ==================== 第八步：内核编译 ====================
+    - name: 【编译】最终同步内核配置
+      run: |
+        cd $GITHUB_WORKSPACE/kernel_workspace/android-kernel
+        make O=out ARCH=arm64 olddefconfig
+        echo "[✓] 最终内核配置同步完成"
+
+    - name: 【编译】正式编译内核
       run: |
         cd $GITHUB_WORKSPACE/kernel_workspace/android-kernel
         export PATH=$GITHUB_WORKSPACE/kernel_workspace/clang-aosp/clang-r450784d/bin:$PATH
-        export KBUILD_BUILD_HOST=17
-        export KBUILD_BUILD_USER=HyperPower
-        make -s -j$(nproc --all) O=out ARCH=arm64 ${{ env.KERNEL_CONFIG }}
-        if [ ${{env.LLVM_CONFIG}}=y ]; then
-        make -j$(nproc --all) CC="ccache clang" O=out ARCH=arm64 CLANG_TRIPLE="aarch64-linux-gnu-" CROSS_COMPILE="aarch64-linux-gnu-" CROSS_COMPILE_ARM32="arm-linux-gnueabi-" KCFLAGS="-Wno-error" LLVM=1 LLVM_IAS=1
+        export KBUILD_BUILD_HOST=HyperPower
+        export KBUILD_BUILD_USER=MI6-FullFunction
+        if [ "${{ env.LLVM_CONFIG }}" = "y" ]; then
+          make -j$(nproc --all) CC="ccache clang" O=out ARCH=arm64 \
+            CLANG_TRIPLE="aarch64-linux-gnu-" \
+            CROSS_COMPILE="aarch64-linux-gnu-" \
+            CROSS_COMPILE_ARM32="arm-linux-gnueabi-" \
+            KCFLAGS="-Wno-error" \
+            LLVM=1 LLVM_IAS=1 2>&1 | tee build.log
         else
-        make -j$(nproc --all) CC="ccache clang" O=out ARCH=arm64 CLANG_TRIPLE="aarch64-linux-gnu-" CROSS_COMPILE="aarch64-linux-gnu-" CROSS_COMPILE_ARM32="arm-linux-gnueabi-" KCFLAGS="-Wno-error"
+          make -j$(nproc --all) CC="ccache clang" O=out ARCH=arm64 \
+            CLANG_TRIPLE="aarch64-linux-gnu-" \
+            CROSS_COMPILE="aarch64-linux-gnu-" \
+            CROSS_COMPILE_ARM32="arm-linux-gnueabi-" \
+            KCFLAGS="-Wno-error" 2>&1 | tee build.log
         fi
-                
-    - name: 准备打包内核
+        echo "[✓] 内核编译完成"
+
+    # ==================== 第九步：打包可刷入镜像 ====================
+    - name: 【打包】制作 AnyKernel3 刷机包
       run: |
         cd $GITHUB_WORKSPACE/kernel_workspace
         git clone https://github.com/osm0sis/AnyKernel3
-        sed -i 's/do.devicecheck=1/do.devicecheck=0/g' AnyKernel3/anykernel.sh
-        # sed -i 's!block=/dev/block/platform/omap/omap_hsmmc.0/by-name/boot;!block=/dev/block/bootdevice/by-name/boot;!g' AnyKernel3/anykernel.sh
-        sed -i 's!/dev/block/platform/omap/omap_hsmmc\.0!/dev/block/bootdevice!g' AnyKernel3/anykernel.sh
-        sed -i 's/is_slot_device=1;/is_slot_device=0;/g' AnyKernel3/anykernel.sh
-        cp android-kernel/out/arch/arm64/boot/Image.gz-dtb AnyKernel3/
-        rm -rf AnyKernel3/.git* AnyKernel3/README.md
-        rm -rf AnyKernel3/ramdisk AnyKernel3/modules AnyKernel3/patch
-    
-    
-    - name: 打包并上传
-      # uses: actions/upload-artifact@v4
+        cd AnyKernel3
+        sed -i 's/do.devicecheck=1/do.devicecheck=0/g' anykernel.sh
+        sed -i 's!block=/dev/block/platform/omap/omap_hsmmc.0/by-name/boot;!block=/dev/block/bootdevice/by-name/boot;!g' anykernel.sh
+        sed -i 's!/dev/block/platform/omap/omap_hsmmc\.0!/dev/block/bootdevice!g' anykernel.sh
+        sed -i 's/is_slot_device=1;/is_slot_device=0;/g' anykernel.sh
+        sed -i 's/device.name1=maguro/device.name1=sagit/g' anykernel.sh
+        sed -i 's/device.name2=toro/device.name2=/g' anykernel.sh
+        sed -i 's/device.name3=toroplus/device.name3=/g' anykernel.sh
+        sed -i 's/device.name4=tuna/device.name4=/g' anykernel.sh
+        sed -i '/init.tuna.rc/d' anykernel.sh
+        sed -i '/fstab.tuna/d' anykernel.sh
+        sed -i '/replace_string init.rc/d' anykernel.sh
+        sed -i '/insert_line init.tuna/d' anykernel.sh
+        sed -i '/patch_fstab fstab.tuna/d' anykernel.sh
+        sed -i '/append_file init.tuna/d' anykernel.sh
+        sed -i '/append_file fstab.tuna/d' anykernel.sh
+        sed -i '/bootscript/d' anykernel.sh
+        sed -i '/usbdisk/d' anykernel.sh
+        cd ..
+        cp android-kernel/out/arch/arm64/boot/${{ env.KERNEL_IMAGE_NAME }} AnyKernel3/
+        rm -rf AnyKernel3/.git* AnyKernel3/README.md AnyKernel3/ramdisk AnyKernel3/modules AnyKernel3/patch
+        echo "[✓] 可刷入刷机包打包完成"
+
+    # ==================== 第十步：产物上传 ====================
+    - name: 【上传】内核刷机包
       uses: actions/upload-artifact@v4
       with:
         name: ${{ env.KERNEL_ZIP_NAME }}
         path: kernel_workspace/AnyKernel3/*
+
+    - name: 【上传】编译日志
+      uses: actions/upload-artifact@v4
+      with:
+        name: 内核构建日志
+        path: kernel_workspace/android-kernel/build.log
+        if-no-files-found: warn
